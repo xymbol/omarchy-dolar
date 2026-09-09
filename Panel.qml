@@ -45,6 +45,11 @@ Panel {
   readonly property var rows: Model.orderRates(rates, root.visibleMarkets)
   readonly property string updatedAt: Model.lastUpdated(rates)
   readonly property var brechaValue: Model.brecha(rates, root.market)
+  // Prefix shown on the pill: the market name, or the configured glyph.
+  readonly property string label: Model.pillPrefix(Model.plainText(setting("icon", "")), root.barEntry)
+  readonly property string tooltipLabel: barEntry
+    ? "Dólar " + barEntry.nombre + (updatedAt ? " · " + updatedAt : "")
+    : "Dólar"
 
   function open() { root.controller.show(); root.refresh() }
   function openFromHotkey() { root.controller.show(); root.refresh() }

@@ -10,10 +10,12 @@ BarWidget {
   id: root
   moduleName: "io.github.xymbol.dolar"
 
-  // Sanitized because WidgetButton's Text uses AutoText — a crafted icon
-  // string in shell.json would otherwise be parsed as markup.
-  readonly property string icon: Model.plainText(setting("icon", ""))
+  // The prefix is the market's name rather than a currency glyph. In Argentina
+  // "$" is the peso sign, and it carries no information here anyway — whereas
+  // the name is what makes two pills distinguishable. Set "icon" for a glyph.
   readonly property string value: panelLoader.item ? panelLoader.item.pillText : ""
+  readonly property string prefix: panelLoader.item ? panelLoader.item.label : ""
+  readonly property string tip: panelLoader.item ? panelLoader.item.tooltipLabel : ""
 
   // The panel is not wired up automatically; the widget hands it its context.
   function injectPanel() {
@@ -74,8 +76,8 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.value === "" ? root.icon : root.icon + "  " + root.value
-    tooltipText: ""
+    text: root.value === "" ? root.prefix : root.prefix + " " + root.value
+    tooltipText: root.tip
 
     onPressed: function(b) {
       if (!root.bar) return

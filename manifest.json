@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.xymbol.dolar",
   "name": "Dólar",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Adrián Mugnolo",
   "license": "MIT",
   "description": "Cotización del dólar blue en la barra.",
@@ -16,7 +16,7 @@
     "displayName": "Dólar",
     "description": "Cotización del dólar",
     "category": "Info",
-    "allowMultiple": false,
+    "allowMultiple": true,
     "defaultSection": "right"
   }
 }

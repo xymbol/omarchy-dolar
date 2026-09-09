@@ -166,3 +166,10 @@ function rowValue(entry) {
   var compra = entry.compra === null ? "—" : formatPesos(entry.compra)
   return compra + " / " + formatPesos(entry.venta)
 }
+
+// Bar prefix: the market's own name, so a pill says what it is — or the
+// configured glyph, when one is set.
+function pillPrefix(icon, entry) {
+  if (icon) return icon
+  return entry ? entry.nombre : "Dólar"
+}
