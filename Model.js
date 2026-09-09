@@ -1,11 +1,39 @@
-// Pure helpers: no QML imports here, so every function can be exercised from
-// plain node while iterating. That loop is much faster than restarting the
-// shell to discover you got a decimal separator wrong.
+// Pure helpers for the Dólar widget: parsing dolarapi's payload, Argentine
+// number formatting, and the brecha. Nothing here imports QML, so every
+// function can be exercised straight from node while iterating.
 
-// Strip what QML's AutoText would parse as rich text. Anything reaching a Text
-// element from shell.json goes through here first.
+// Row order for the panel. dolarapi returns its own order; this one leads
+// with the rates people actually quote out loud and leaves mayorista — a
+// wholesale rate nobody uses in conversation — last.
+var MARKET_ORDER = ["blue", "oficial", "tarjeta", "bolsa", "contadoconliqui", "cripto", "mayorista"]
+
+// Short labels. dolarapi's own `nombre` field is wildly uneven in length
+// ("Blue" next to "Contado con liquidación") and blows out the panel column,
+// so the widely-used abbreviations are hardcoded instead.
+// Keys are dolarapi's `market` values verbatim - data, not identifiers.
+// Do not anglicise them or the lookup silently falls through.
+var MARKET_LABELS = {
+  blue: "Blue",
+  oficial: "Oficial",
+  tarjeta: "Tarjeta",
+  bolsa: "MEP",
+  contadoconliqui: "CCL",
+  cripto: "Cripto",
+  mayorista: "Mayorista"
+}
+
+function labelForMarket(market) {
+  return MARKET_LABELS[market] || String(market || "")
+}
+
+// Strip what QML's AutoText would parse as rich text. Every string that
+// reaches a Text element from shell.json goes through here first.
 function plainText(value) {
   return String(value === null || value === undefined ? "" : value).replace(/[<>&]/g, "")
+}
+
+function pad2(n) {
+  return (n < 10 ? "0" : "") + n
 }
 
 function groupThousands(whole) {
@@ -20,8 +48,8 @@ function groupThousands(whole) {
 
 // 1545 -> "1.545"; 1522.8 -> "1.522,80". Hand-rolled rather than
 // toLocaleString because QML's JS locale follows the system locale, which is
-// not es-AR on most machines — the separators would come out swapped, which is
-// exactly the error this widget must never make.
+// not es-AR on most machines — the separators would come out swapped, which
+// is exactly the error this widget must never make.
 function formatPesos(value, decimals) {
   var n = Number(value)
   if (!isFinite(n)) return "—"
@@ -31,7 +59,9 @@ function formatPesos(value, decimals) {
   return (n < 0 ? "-" : "") + formatted
 }
 
-// dolarapi returns a flat array of markets.
+// dolarapi returns a flat array of markets. Anything unparseable yields an
+// empty list, which the panel treats as "keep showing the last good numbers"
+// rather than blanking the bar.
 function parseRates(raw) {
   try {
     var data = JSON.parse(String(raw || ""))
@@ -40,11 +70,22 @@ function parseRates(raw) {
     for (var i = 0; i < data.length; i++) {
       var d = data[i]
       if (!d || typeof d !== "object") continue
+      // dolarapi names this field `market`; rows read back from our own cache
+      // have already been normalised to `market`. Accept either, or the
+      // parse rejects every row.
+      var market = String(d.casa || d.market || "")
+      var compra = Number(d.compra)
       var venta = Number(d.venta)
-      // dolarapi names this field `market`; we call it `market`.
-      var market = String(d.casa || "")
+      // venta is the side the pill shows by default, so a row without it is
+      // useless; compra missing is survivable and renders as an em dash.
       if (!market || !isFinite(venta)) continue
-      out.push({ market: market, compra: Number(d.compra), venta: venta })
+      out.push({
+        market: market,
+        nombre: labelForMarket(market),
+        compra: isFinite(compra) ? compra : null,
+        venta: venta,
+        fecha: String(d.fechaActualizacion || "")
+      })
     }
     return out
   } catch (e) {
@@ -56,4 +97,72 @@ function findMarket(rateList, market) {
   for (var i = 0; i < (rateList ? rateList.length : 0); i++)
     if (rateList[i].market === market) return rateList[i]
   return null
+}
+
+// `preferred` (the optional `markets` setting) both filters and orders. Without
+// it MARKET_ORDER wins, and any market dolarapi adds later lands at the end rather than
+// silently disappearing from the panel.
+function orderRates(rateList, preferred) {
+  var explicit = !!(preferred && preferred.length)
+  var order = explicit ? preferred : MARKET_ORDER
+  var out = []
+  for (var i = 0; i < order.length; i++) {
+    var m = findMarket(rateList, String(order[i]))
+    if (m) out.push(m)
+  }
+  if (!explicit) {
+    for (var j = 0; j < (rateList ? rateList.length : 0); j++)
+      if (order.indexOf(rateList[j].market) === -1) out.push(rateList[j])
+  }
+  return out
+}
+
+// Brecha cambiaria: how far a market sits above the official rate, in percent.
+// Quoted off venta because that is the side you actually pay.
+function brecha(rateList, market) {
+  var a = findMarket(rateList, market || "blue")
+  var official = findMarket(rateList, "oficial")
+  if (!a || !official || !isFinite(a.venta) || !isFinite(official.venta) || official.venta === 0)
+    return null
+  return (a.venta / official.venta - 1) * 100
+}
+
+function formatBrecha(value) {
+  if (value === null || value === undefined || !isFinite(value)) return "—"
+  var sign = value > 0 ? "+" : (value < 0 ? "-" : "")
+  return sign + formatPesos(Math.abs(value), 1) + " %"
+}
+
+// "20:58", local time, from the most recent per-market timestamp in the payload.
+// dolarapi stamps each market separately and they drift apart by hours — the
+// official stops moving at 18:00 while blue keeps ticking — so the newest one
+// is the only honest thing to label the panel with.
+function lastUpdated(rateList) {
+  var newest = 0
+  for (var i = 0; i < (rateList ? rateList.length : 0); i++) {
+    var t = Date.parse(rateList[i].fecha)
+    if (isFinite(t) && t > newest) newest = t
+  }
+  if (!newest) return ""
+  var d = new Date(newest)
+  return pad2(d.getHours()) + ":" + pad2(d.getMinutes())
+}
+
+// Bar pill text. `side` picks the side: "venta" (default), "compra", or
+// "ambos" for the full "1.525 / 1.545".
+function pillValue(entry, side) {
+  if (!entry) return ""
+  if (side === "ambos" && entry.compra !== null)
+    return formatPesos(entry.compra) + " / " + formatPesos(entry.venta)
+  if (side === "compra" && entry.compra !== null)
+    return formatPesos(entry.compra)
+  return formatPesos(entry.venta)
+}
+
+// "1.525 / 1.545" for the panel's value column, independent of `side`:
+// the panel is the detail view and always shows both sides.
+function rowValue(entry) {
+  if (!entry) return "—"
+  var compra = entry.compra === null ? "—" : formatPesos(entry.compra)
+  return compra + " / " + formatPesos(entry.venta)
 }
