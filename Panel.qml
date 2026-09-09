@@ -34,7 +34,11 @@ Panel {
   // move fast enough to justify hammering it from every Omarchy bar.
   readonly property int refreshSeconds: Math.max(60, parseInt(setting("refreshSeconds", 300), 10) || 300)
 
+  // Last good payload, deliberately kept across failed refreshes: a dropped
+  // network should leave the previous number on the bar, not blank it.
   property var rates: []
+  property int retries: 0
+  property bool offline: false
 
   readonly property var barEntry: Model.findMarket(rates, root.market)
   readonly property string pillText: Model.pillValue(barEntry, root.showSide)
@@ -63,8 +67,33 @@ Panel {
     command: ["curl", "-fsS", "--max-time", "8", "https://dolarapi.com/v1/dolares"]
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.rates = Model.parseRates(text)
+      onStreamFinished: {
+        var parsed = Model.parseRates(text)
+        if (parsed.length) {
+          root.rates = parsed
+          root.offline = false
+          root.retries = 0
+        } else {
+          root.scheduleRetry()
+        }
+      }
     }
+  }
+
+  // A failed fetch on a laptop is usually a suspended-and-resumed machine whose
+  // wifi has not reassociated yet, so retry a few times before falling back to
+  // the ordinary refresh interval.
+  function scheduleRetry() {
+    root.offline = true
+    if (root.retries >= 3) return
+    root.retries++
+    retryTimer.restart()
+  }
+
+  Timer {
+    id: retryTimer
+    interval: 4000
+    onTriggered: if (!fetchProc.running) fetchProc.running = true
   }
 
   Timer {
@@ -206,7 +235,11 @@ Panel {
             id: footer
             anchors.left: parent.left
             anchors.leftMargin: Style.space(16)
-            text: root.updatedAt === "" ? "cargando…" : "actualizado " + root.updatedAt
+            text: {
+              if (root.rates.length === 0) return root.offline ? "sin conexión" : "cargando…"
+              if (root.offline) return "sin conexión · último dato " + root.updatedAt
+              return "actualizado " + root.updatedAt
+            }
             textFormat: Text.PlainText
             color: root.fgDim
             font.family: root.fontName
@@ -214,10 +247,14 @@ Panel {
             renderType: Text.NativeRendering
           }
 
+          // The column hint is decorative; a status message is not. Hide it
+          // rather than let the two collide, which they do as soon as the
+          // footer says anything longer than "actualizado HH:MM".
           Text {
             anchors.right: parent.right
             anchors.rightMargin: Style.space(16)
             anchors.baseline: footer.baseline
+            visible: !root.offline
             text: "compra / venta"
             textFormat: Text.PlainText
             color: root.fgDim
