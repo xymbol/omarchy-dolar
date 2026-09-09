@@ -66,6 +66,32 @@ Panel {
     command: ["mkdir", "-p", Quickshell.env("HOME") + "/.local/state/omarchy/settings"]
   }
 
+  // Keyboard cursor. Mouse hover writes to the same property rather than
+  // keeping its own highlight, so the pointer and the keyboard can never
+  // disagree about which row is current.
+  property int cursorIndex: 0
+
+  function indexOfMarket(market) {
+    for (var i = 0; i < root.rows.length; i++)
+      if (root.rows[i].market === market) return i
+    return 0
+  }
+
+  function moveCursor(dy) {
+    var n = root.rows.length
+    if (!n) return
+    root.cursorIndex = ((root.cursorIndex + dy) % n + n) % n
+  }
+
+  function activateCursor() {
+    if (root.cursorIndex < 0 || root.cursorIndex >= root.rows.length) return
+    root.selectMarket(root.rows[root.cursorIndex].market)
+  }
+
+  // `markets` can shrink the list at runtime, and a stale index would otherwise
+  // point past the end until the next keypress.
+  onRowsChanged: if (root.cursorIndex >= root.rows.length) root.cursorIndex = 0
+
   function selectMarket(nueva) {
     if (!nueva || nueva === root.market) return
     var updated = Model.withSelection(root.persisted, root.declaredMarket, nueva)
@@ -99,8 +125,16 @@ Panel {
     ? "Dólar " + barEntry.nombre + (updatedAt ? " · " + updatedAt : "")
     : "Dólar"
 
-  function open() { root.controller.show(); root.refresh() }
-  function openFromHotkey() { root.controller.show(); root.refresh() }
+  function open() {
+    root.cursorIndex = root.indexOfMarket(root.market)
+    root.controller.show()
+    root.refresh()
+  }
+  function openFromHotkey() {
+    root.cursorIndex = root.indexOfMarket(root.market)
+    root.controller.show()
+    root.refresh()
+  }
   function close() { root.controller.hide() }
   function toggle() { if (root.opened) root.close(); else root.open() }
 
@@ -172,6 +206,11 @@ Panel {
       anchors.fill: parent
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
+      // Return and Space both arrive as activateRequested, so wiring it alone
+      // covers each without acting twice on Return.
+      onMoveRequested: function(dx, dy) { if (dy !== 0) root.moveCursor(dy) }
+      onActivateRequested: root.activateCursor()
+      onTextKey: function(t) { if (t === "r") root.refresh() }
 
       Column {
         id: content
@@ -247,10 +286,12 @@ Panel {
           Item {
             id: row
             required property var modelData
+            required property int index
             width: content.width
             height: Style.space(24)
 
             readonly property bool isActive: modelData.market === root.market
+            readonly property bool underCursor: row.index === root.cursorIndex
 
             // Hover fill sits inside the panel's text margins so the highlight
             // reads as a row, not as a full-bleed band.
@@ -259,7 +300,7 @@ Panel {
               anchors.leftMargin: Style.space(8)
               anchors.rightMargin: Style.space(8)
               radius: Style.cornerRadius
-              color: rowMouse.containsMouse ? Style.hoverFillFor(root.fg, Color.accent) : "transparent"
+              color: row.underCursor ? Style.hoverFillFor(root.fg, Color.accent) : "transparent"
             }
 
             // Declared before the labels so the text paints over the fill;
@@ -269,6 +310,8 @@ Panel {
               anchors.fill: parent
               hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
+              // Hover drives the shared cursor instead of a separate highlight.
+              onEntered: root.cursorIndex = row.index
               onClicked: root.selectMarket(row.modelData.market)
             }
 
@@ -278,7 +321,8 @@ Panel {
               anchors.verticalCenter: parent.verticalCenter
               text: row.modelData.nombre
               textFormat: Text.PlainText
-              color: row.isActive ? Color.accent : root.fgDim
+              color: row.underCursor ? Style.hoverStateColor(root.fg, Color.accent)
+                                     : (row.isActive ? Color.accent : root.fgDim)
               font.family: root.fontName
               font.pixelSize: Style.font.body
               renderType: Text.NativeRendering
@@ -290,7 +334,8 @@ Panel {
               anchors.verticalCenter: parent.verticalCenter
               text: Model.rowValue(row.modelData)
               textFormat: Text.PlainText
-              color: row.isActive ? Color.accent : root.fg
+              color: row.underCursor ? Style.hoverStateColor(root.fg, Color.accent)
+                                     : (row.isActive ? Color.accent : root.fg)
               font.family: root.fontName
               font.pixelSize: Style.font.body
               renderType: Text.NativeRendering
