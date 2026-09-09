@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
@@ -23,7 +24,13 @@ Panel {
   readonly property color fgDim: Qt.darker(fg, 1.5)
   readonly property string fontName: root.bar ? root.bar.fontFamily : Style.font.family
 
-  readonly property string market: Model.plainText(setting("market", "blue"))
+  // The declared identity of this instance. Under allowMultiple this is what
+  // separates one pill's persisted selection from another's, so it is read
+  // from shell.json and never reassigned.
+  readonly property string declaredMarket: Model.plainText(setting("market", "blue"))
+  // What the pill actually shows: the clicked selection when there is one,
+  // otherwise the declared market.
+  readonly property string market: Model.selectedMarket(root.persisted, root.declaredMarket)
   readonly property bool showBrecha: setting("showBrecha", true) === true
   // Which side of the spread the pill shows: "venta" (default), "compra", or
   // "ambos" for both.
@@ -33,6 +40,47 @@ Panel {
   // Floored at 60s: dolarapi is free and unauthenticated, and the rates do not
   // move fast enough to justify hammering it from every Omarchy bar.
   readonly property int refreshSeconds: Math.max(60, parseInt(setting("refreshSeconds", 300), 10) || 300)
+
+  // ---- Persisted selection ----
+  property var persisted: ({ version: 1, selection: {} })
+  readonly property string statePath: Quickshell.env("HOME") + "/.local/state/omarchy/settings/dolar.json"
+
+  FileView {
+    id: stateFile
+    path: root.statePath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.persisted = Model.parseState(text())
+    onLoadFailed: root.persisted = Model.parseState("")
+    // Watching means a sibling pill's write lands here too, so two instances
+    // stay consistent without either knowing about the other.
+    onFileChanged: reload()
+  }
+
+  // setText will not create the directory, and it may not exist on a fresh
+  // install. Same guard the notifications service uses.
+  Process {
+    id: mkdirProc
+    running: true
+    command: ["mkdir", "-p", Quickshell.env("HOME") + "/.local/state/omarchy/settings"]
+  }
+
+  function selectMarket(nueva) {
+    if (!nueva || nueva === root.market) return
+    var updated = Model.withSelection(root.persisted, root.declaredMarket, nueva)
+    root.persisted = updated
+    stateFile.setText(JSON.stringify(updated, null, 2) + "\n")
+  }
+
+  // Wheel over the pill steps through the same list the panel shows, so the
+  // two affordances never disagree about what comes next.
+  function cycleMarket(delta) {
+    var order = []
+    for (var i = 0; i < root.rows.length; i++) order.push(root.rows[i].market)
+    if (!order.length) return
+    root.selectMarket(Model.nextMarket(order, root.market, delta))
+  }
 
   // Last good payload, deliberately kept across failed refreshes: a dropped
   // network should leave the previous number on the bar, not blank it.
@@ -203,6 +251,26 @@ Panel {
             height: Style.space(24)
 
             readonly property bool isActive: modelData.market === root.market
+
+            // Hover fill sits inside the panel's text margins so the highlight
+            // reads as a row, not as a full-bleed band.
+            Rectangle {
+              anchors.fill: parent
+              anchors.leftMargin: Style.space(8)
+              anchors.rightMargin: Style.space(8)
+              radius: Style.cornerRadius
+              color: rowMouse.containsMouse ? Style.hoverFillFor(root.fg, Color.accent) : "transparent"
+            }
+
+            // Declared before the labels so the text paints over the fill;
+            // Text takes no input, so the whole row stays clickable.
+            MouseArea {
+              id: rowMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.selectMarket(row.modelData.market)
+            }
 
             Text {
               anchors.left: parent.left

@@ -31,6 +31,10 @@ BarWidget {
     if (panelLoader.item && panelLoader.item.refresh) panelLoader.item.refresh()
   }
 
+  function cycleMarket(delta) {
+    if (panelLoader.item && panelLoader.item.cycleMarket) panelLoader.item.cycleMarket(delta)
+  }
+
   function togglePanel() {
     if (panelLoader.item && panelLoader.item.toggle) panelLoader.item.toggle()
   }
@@ -84,5 +88,7 @@ BarWidget {
       if (b === Qt.MiddleButton) root.refresh()
       else root.togglePanel()
     }
+
+    onWheelMoved: function(delta) { root.cycleMarket(delta) }
   }
 }

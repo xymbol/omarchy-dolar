@@ -173,3 +173,51 @@ function pillPrefix(icon, entry) {
   if (icon) return icon
   return entry ? entry.nombre : "Dólar"
 }
+
+// ---- Persisted selection ----------------------------------------------
+//
+// The bar entry's `market` is the *declared* identity of an instance; the state
+// file records what the user has since clicked. Keying by the declared market is
+// what makes this work under allowMultiple — two pills declared `blue` and
+// `tarjeta` keep independent selections inside one file.
+
+function parseState(raw) {
+  var empty = { version: 1, selection: {} }
+  try {
+    var data = JSON.parse(String(raw || ""))
+    if (!data || typeof data !== "object") return empty
+    var sel = (data.selection && typeof data.selection === "object") ? data.selection : {}
+    var clean = {}
+    for (var k in sel) if (typeof sel[k] === "string" && sel[k]) clean[k] = sel[k]
+    return { version: 1, selection: clean }
+  } catch (e) {
+    return empty
+  }
+}
+
+function selectedMarket(persisted, declared) {
+  var d = String(declared || "blue")
+  if (persisted && persisted.selection && typeof persisted.selection[d] === "string" && persisted.selection[d])
+    return persisted.selection[d]
+  return d
+}
+
+// A new persisted with this instance's selection set. Built by merging into the
+// last-loaded object rather than rewriting the file wholesale, so a sibling
+// pill's selection survives. Two pills clicked in the same instant could still
+// race; the loser self-corrects on its next click, which is proportionate.
+function withSelection(persisted, declared, market) {
+  var base = parseState(JSON.stringify(persisted || { version: 1, selection: {} }))
+  base.selection[String(declared || "blue")] = String(market || "")
+  return base
+}
+
+// Next market in `order`, wrapping. Positive delta moves down the panel's list,
+// matching the direction the rows are read.
+function nextMarket(order, current, delta) {
+  if (!order || !order.length) return current
+  var i = order.indexOf(current)
+  if (i === -1) i = 0
+  var n = ((i + (delta > 0 ? 1 : -1)) % order.length + order.length) % order.length
+  return order[n]
+}
