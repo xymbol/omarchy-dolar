@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.xymbol.dolar",
   "name": "Dólar",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "author": "Adrián Mugnolo",
   "license": "MIT",
-  "description": "Cotización del dólar blue en la barra.",
+  "description": "Cotizaciones del dólar argentino en la barra: blue, oficial, tarjeta, MEP, CCL, cripto y mayorista, con la brecha cambiaria.",
   "kinds": [
     "bar-widget"
   ],

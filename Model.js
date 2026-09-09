@@ -64,7 +64,16 @@ function formatPesos(value, decimals) {
 // rather than blanking the bar.
 function parseRates(raw) {
   try {
-    var data = JSON.parse(String(raw || ""))
+    return normalizeRates(JSON.parse(String(raw || "")))
+  } catch (e) {
+    return []
+  }
+}
+
+// Shared by the network parser and the cache reader, so a tampered cache file
+// cannot inject rows the network path would have rejected.
+function normalizeRates(data) {
+  {
     if (!Array.isArray(data)) return []
     var out = []
     for (var i = 0; i < data.length; i++) {
@@ -84,12 +93,13 @@ function parseRates(raw) {
         nombre: labelForMarket(market),
         compra: isFinite(compra) ? compra : null,
         venta: venta,
-        fecha: String(d.fechaActualizacion || "")
+        // dolarapi calls it fechaActualizacion; rows read back from the cache
+        // have already been normalised to `fecha`. Accept either, or the
+        // timestamp is silently lost on every cache round-trip.
+        fecha: String(d.fechaActualizacion || d.fecha || "")
       })
     }
     return out
-  } catch (e) {
-    return []
   }
 }
 
@@ -182,17 +192,36 @@ function pillPrefix(icon, entry) {
 // `tarjeta` keep independent selections inside one file.
 
 function parseState(raw) {
-  var empty = { version: 1, selection: {} }
+  var empty = { version: 1, selection: {}, cache: null }
   try {
     var data = JSON.parse(String(raw || ""))
     if (!data || typeof data !== "object") return empty
     var sel = (data.selection && typeof data.selection === "object") ? data.selection : {}
     var clean = {}
     for (var k in sel) if (typeof sel[k] === "string" && sel[k]) clean[k] = sel[k]
-    return { version: 1, selection: clean }
+    var cache = null
+    if (data.cache && typeof data.cache === "object") {
+      var rows = normalizeRates(data.cache.rates)
+      if (rows.length) cache = { savedAt: String(data.cache.savedAt || ""), rates: rows }
+    }
+    return { version: 1, selection: clean, cache: cache }
   } catch (e) {
     return empty
   }
+}
+
+// Cache the last good payload inside the same state file. It belongs there
+// because it is the same kind of thing as the selection: local, disposable,
+// and rebuilt from the network the moment one is available.
+function withCache(persisted, rates, iso) {
+  var base = parseState(JSON.stringify(persisted || { version: 1, selection: {} }))
+  base.cache = { savedAt: String(iso || ""), rates: rates || [] }
+  return base
+}
+
+function cacheFromState(persisted) {
+  if (!persisted || !persisted.cache) return []
+  return normalizeRates(persisted.cache.rates)
 }
 
 function selectedMarket(persisted, declared) {

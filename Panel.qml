@@ -92,6 +92,28 @@ Panel {
   // point past the end until the next keypress.
   onRowsChanged: if (root.cursorIndex >= root.rows.length) root.cursorIndex = 0
 
+  // Seed from the cached payload the moment the state file loads, so a cold
+  // start with no network shows last-known rates instead of an empty pill. The
+  // fetch is already in flight and will overwrite these as soon as it lands.
+  onPersistedChanged: {
+    if (root.rates.length === 0) {
+      var cached = Model.cacheFromState(root.persisted)
+      if (cached.length) {
+        root.rates = cached
+        root.fromCache = true
+      }
+    }
+  }
+
+  function saveCache(rateList) {
+    // Only write when the payload actually changed: two pills share this file
+    // and the refresh timer fires every five minutes.
+    if (JSON.stringify(Model.cacheFromState(root.persisted)) === JSON.stringify(rateList)) return
+    var updated = Model.withCache(root.persisted, rateList, new Date().toISOString())
+    root.persisted = updated
+    stateFile.setText(JSON.stringify(updated, null, 2) + "\n")
+  }
+
   function selectMarket(nueva) {
     if (!nueva || nueva === root.market) return
     var updated = Model.withSelection(root.persisted, root.declaredMarket, nueva)
@@ -113,6 +135,8 @@ Panel {
   property var rates: []
   property int retries: 0
   property bool offline: false
+  // True while the numbers on screen came from disk rather than the network.
+  property bool fromCache: false
 
   readonly property var barEntry: Model.findMarket(rates, root.market)
   readonly property string pillText: Model.pillValue(barEntry, root.showSide)
@@ -159,7 +183,9 @@ Panel {
         if (parsed.length) {
           root.rates = parsed
           root.offline = false
+          root.fromCache = false
           root.retries = 0
+          root.saveCache(parsed)
         } else {
           root.scheduleRetry()
         }
@@ -356,6 +382,7 @@ Panel {
             text: {
               if (root.rates.length === 0) return root.offline ? "sin conexión" : "cargando…"
               if (root.offline) return "sin conexión · último dato " + root.updatedAt
+              if (root.fromCache) return "último dato " + root.updatedAt
               return "actualizado " + root.updatedAt
             }
             textFormat: Text.PlainText
@@ -372,7 +399,7 @@ Panel {
             anchors.right: parent.right
             anchors.rightMargin: Style.space(16)
             anchors.baseline: footer.baseline
-            visible: !root.offline
+            visible: !root.offline && !root.fromCache
             text: "compra / venta"
             textFormat: Text.PlainText
             color: root.fgDim
